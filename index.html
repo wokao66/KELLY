@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KELLY Capture</title>
+    <style>
+        :root {
+            --bg-color: #080808;
+            --card-bg: #151515; /* 图片加载前的占位颜色 */
+            --scroll-speed: 0.8; 
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            overflow: hidden;
+            font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+
+        /* 滚动总容器 */
+        #scroll-wrapper {
+            position: absolute;
+            width: 100%;
+            top: 0;
+            left: 0;
+            will-change: transform;
+        }
+
+        .gallery-container {
+            column-count: 3;
+            column-gap: 20px;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        @media (max-width: 900px) { .gallery-container { column-count: 2; } }
+        @media (max-width: 600px) { .gallery-container { column-count: 1; } }
+
+        /* 图片卡片样式 */
+        .img-card {
+            break-inside: avoid;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            background-color: var(--card-bg); /* 加载前的底色 */
+            overflow: hidden;
+            position: relative;
+            /* 这种柔和阴影让图片更有质感 */
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .img-card img {
+            width: 100%;
+            height: auto;
+            display: block;
+            
+            /* 关键：初始状态为透明，且略微缩小 */
+            opacity: 0;
+            transform: scale(0.98);
+            filter: blur(5px); /* 增加一点模糊感 */
+            
+            /* 定义过渡动画：透明度、缩放、模糊 */
+            transition: 
+                opacity 1.2s ease-out, 
+                transform 1.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+                filter 1.2s ease-out;
+        }
+
+        /* 图片加载成功后的类名 */
+        .img-card img.loaded {
+            opacity: 1;
+            transform: scale(1);
+            filter: blur(0);
+        }
+
+        /* 顶部遮罩：让顶部图片离开时逐渐隐去 */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 150px;
+            background: linear-gradient(to bottom, var(--bg-color), transparent);
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* 底部遮罩：让底部图片进入时逐渐显现 */
+        body::after {
+            content: "";
+            position: fixed;
+            bottom: 0; left: 0; width: 100%; height: 150px;
+            background: linear-gradient(to top, var(--bg-color), transparent);
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .loading-screen {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #555;
+            z-index: 100;
+            transition: opacity 0.8s ease;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loading-screen" class="loading-screen">
+    <p>正在同步云端画库...</p>
+</div>
+
+<div id="scroll-wrapper">
+    <div id="g1" class="gallery-container"></div>
+    <div id="g2" class="gallery-container"></div>
+</div>
+
+<script>
+    const CONFIG = {
+        username: 'wokao66', 
+        repo: 'KELLY',
+        speed: 0.8 
+    };
+
+    let currentY = 0;
+    let isPaused = false;
+    const wrapper = document.getElementById('scroll-wrapper');
+    const g1 = document.getElementById('g1');
+    const g2 = document.getElementById('g2');
+
+    async function init() {
+        try {
+            const rootRes = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/`);
+            const items = await rootRes.json();
+            const folders = items.filter(i => i.type === 'dir' && !i.name.startsWith('.'));
+
+            let urls = [];
+            for (const f of folders) {
+                const res = await fetch(f.url);
+                const files = await res.json();
+                urls = [...urls, ...files.filter(x => x.name.toLowerCase().endsWith('.webp')).map(x => x.download_url)];
+            }
+
+            render(urls);
+            
+            // 消失加载遮罩
+            setTimeout(() => {
+                document.getElementById('loading-screen').style.opacity = '0';
+                setTimeout(() => document.getElementById('loading-screen').remove(), 800);
+            }, 1000);
+
+            startScroll();
+        } catch (e) {
+            document.getElementById('loading-screen').innerText = "配置错误，请检查仓库";
+        }
+    }
+
+    function render(urls) {
+        // 洗牌算法：让图片顺序随机，每次刷新都有新鲜感
+        urls.sort(() => Math.random() - 0.5);
+
+        const html = urls.map(url => `
+            <div class="img-card">
+                <img src="${url}" onload="this.classList.add('loaded')">
+            </div>
+        `).join('');
+        
+        g1.innerHTML = html;
+        g2.innerHTML = html;
+    }
+
+    function startScroll() {
+        function step() {
+            if (!isPaused) {
+                currentY -= CONFIG.speed;
+                const h = g1.offsetHeight;
+                if (Math.abs(currentY) >= h) currentY = 0;
+                wrapper.style.transform = `translate3d(0, ${currentY}px, 0)`;
+            }
+            requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
+    // 悬停交互
+    wrapper.addEventListener('mouseenter', () => isPaused = true);
+    wrapper.addEventListener('mouseleave', () => isPaused = false);
+    init();
+</script>
+
+</body>
+</html>
